@@ -1,0 +1,9 @@
+chromium:
+  headless: false
+  slow_mo: 0
+firefox:
+  headless: true
+  slow_mo: 0
+webkit:
+  headless: true
+  slow_mo: 0

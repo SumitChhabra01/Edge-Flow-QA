@@ -1,0 +1,24 @@
+framework:
+  name: EdgeQA
+  version: "1.0.0"
+timeouts:
+  default: 10000
+  navigation: 20000
+  api: 15000
+retries:
+  step: 1
+  test: 0
+screenshots:
+  on_failure: true
+  full_page: true
+video:
+  enabled: false
+ai:
+  enabled: false
+reporting:
+  allure_dir: reports/allure
+  html_report: reports/summary.html
+paths:
+  logs_dir: logs
+  reports_dir: reports
+  artifacts_dir: reports/artifacts
