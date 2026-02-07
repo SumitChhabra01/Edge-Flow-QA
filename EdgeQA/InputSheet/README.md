@@ -37,3 +37,45 @@ Example:
 - Reuse flows for login, setup, and cleanup
 - Use `{{base_url}}` for environment-aware URLs
 - For API payloads, you can use inline JSON or a `.json` file in `InputSheet/`
+
+## Object Repository (POM)
+
+### Why POM is used
+
+POM keeps all UI locators in one place so tests stay clean and easy to read. If a locator changes, you update it once in the repository instead of fixing every test.
+
+### How to add a new page
+
+1. Open `ObjectRepository.xlsx`.
+2. Add a new sheet named after your page (for example, `LoginPage`).
+3. Add locators using the columns: `LocatorName`, `LocatorType`, `LocatorValue`.
+
+### How to add locators
+
+Example:
+
+| LocatorName | LocatorType | LocatorValue |
+| ----------- | ----------- | ------------ |
+| username    | css         | #username    |
+| loginBtn    | css         | #loginBtn    |
+
+### How to reference locators in tests
+
+Use this format in the **Locator** column:
+
+```
+PageName.LocatorName
+```
+
+Example:
+
+```
+LoginPage.username
+```
+
+### Best practices
+
+- Use short, clear locator names
+- Keep names consistent across pages
+- Prefer stable locators like IDs or data attributes
+- Reuse the same locator across flows and tests

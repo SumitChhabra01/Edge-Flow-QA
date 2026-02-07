@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import asyncio
 import contextlib
@@ -25,6 +25,7 @@ from core.api_client import ApiClient
 from core.driver_factory import create_playwright_manager
 from data.excel_reader import load_flows_from_excel, load_steps_from_excel, load_testcases_from_excel
 from data.json_reader import load_steps_from_json
+from data.object_repository_loader import load_object_repository
 from utils.config_loader import load_config
 from utils.file_utils import ensure_dirs, resolve_path
 from utils.logger import get_logger
@@ -75,6 +76,8 @@ class CodelessExecutor:
         self._flow_stack: List[str] = []
         self._flow_resolver: Optional[FlowResolver] = None
         self._suite_dir: Optional[str] = None
+        self._object_repo: Dict[str, Dict[str, Tuple[str, str]]] = {}
+        self._object_repo_path = resolve_path(self.root_dir, "InputSheet", "ObjectRepository.xlsx")
         self._action_map = None
         self._manager = None
 
@@ -88,6 +91,7 @@ class CodelessExecutor:
     def _execute_suite_internal(self, suite_path: str, sheet_name: Optional[str]) -> None:
         """Execute a codeless suite in the current thread."""
         self._suite_dir = os.path.dirname(suite_path)
+        self._object_repo = load_object_repository(self._object_repo_path)
         steps_by_test, flows, test_case_ids = self._load_steps(suite_path, sheet_name)
         self._flow_resolver = FlowResolver(flows, test_case_ids)
         for steps in steps_by_test.values():
@@ -180,13 +184,19 @@ class CodelessExecutor:
             action(flow_name)
             return
         if step.action in {"click", "hover", "wait_for_element", "assert_visible"}:
-            action(self._resolve_placeholders(step.locator or ""))
+            action(self._resolve_locator(self._resolve_placeholders(step.locator or "")))
             return
         if step.action in {"fill_text", "select_dropdown"}:
-            action(self._resolve_placeholders(step.locator or ""), self._resolve_placeholders(step.value or ""))
+            action(
+                self._resolve_locator(self._resolve_placeholders(step.locator or "")),
+                self._resolve_placeholders(step.value or ""),
+            )
             return
         if step.action == "assert_text":
-            action(self._resolve_placeholders(step.locator or ""), self._resolve_placeholders(step.expected or ""))
+            action(
+                self._resolve_locator(self._resolve_placeholders(step.locator or "")),
+                self._resolve_placeholders(step.expected or ""),
+            )
             return
         if step.action in {"api_get"}:
             endpoint = step.value or step.locator or ""
@@ -279,6 +289,28 @@ class CodelessExecutor:
         self._action_map = action_map
         self._manager = manager
 
+    def _resolve_locator(self, locator: Optional[str]) -> str:
+        """Resolve POM-style locators to Playwright selectors."""
+        if locator is None:
+            return ""
+        if "." not in locator:
+            return locator
+        if locator.count(".") != 1:
+            raise ValueError("Invalid locator format. Expected PageName.LocatorName")
+        page_name, locator_name = locator.split(".", 1)
+        if not page_name or not locator_name:
+            raise ValueError("Invalid locator format. Expected PageName.LocatorName")
+        if page_name not in self._object_repo:
+            raise ValueError(f"Page '{page_name}' not found in ObjectRepository.xlsx")
+        page_locators = self._object_repo.get(page_name, {})
+        if locator_name not in page_locators:
+            raise ValueError(f"Locator '{locator_name}' not found in page '{page_name}'")
+        locator_type, locator_value = page_locators[locator_name]
+        selector = _to_selector(locator_type, locator_value)
+        self.logger.info("[POM] Resolved %s -> %s", locator, selector)
+        _allure_attach_text(f"{locator} -> {selector}", "POM Resolver")
+        return selector
+
 
 def _combine_url(base_url: str, path: str) -> str:
     if path.startswith("http://") or path.startswith("https://"):
@@ -327,6 +359,14 @@ def _allure_step(title: str):
         yield
 
 
+def _allure_attach_text(content: str, name: str) -> None:
+    if allure:
+        try:
+            allure.attach(content, name=name, attachment_type=allure.attachment_type.TEXT)
+        except Exception:  # noqa: BLE001
+            return
+
+
 def _is_event_loop_running() -> bool:
     """Return True if an asyncio loop is running in this thread."""
     try:
@@ -351,3 +391,20 @@ def _run_in_thread(func, *args, **kwargs) -> None:
     thread.join()
     if exception_holder:
         raise exception_holder[0]
+
+
+def _to_selector(locator_type: str, locator_value: str) -> str:
+    locator_type = locator_type.strip().lower()
+    locator_value = locator_value.strip()
+    if locator_value.startswith(("css=", "xpath=", "text=", "id=")):
+        return locator_value
+    mapping = {
+        "css": "css=",
+        "xpath": "xpath=",
+        "text": "text=",
+        "id": "id=",
+    }
+    prefix = mapping.get(locator_type)
+    if not prefix:
+        raise ValueError(f"Unsupported locator type: {locator_type}")
+    return f"{prefix}{locator_value}"
