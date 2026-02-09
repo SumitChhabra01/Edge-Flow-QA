@@ -40,8 +40,10 @@ def pytest_configure() -> None:
     root_dir = os.path.abspath(os.path.dirname(__file__))
     reports_dir = resolve_path(root_dir, "reports")
     human_dir = resolve_path(reports_dir, "human")
+    screenshots_dir = resolve_path(reports_dir, "artifacts", "screenshots")
     logs_dir = resolve_path(root_dir, "logs")
-    ensure_dirs([reports_dir, human_dir, logs_dir])
+    ensure_dirs([reports_dir, human_dir, logs_dir, screenshots_dir])
+    _clean_directory(screenshots_dir)
     if not hasattr(pytest, "edgeqa_tests"):
         pytest.edgeqa_tests = {}
 
@@ -100,6 +102,7 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     root_dir = os.path.abspath(os.path.dirname(__file__))
     reports_dir = resolve_path(root_dir, "reports")
     human_dir = resolve_path(reports_dir, "human")
+    screenshots_dir = resolve_path(reports_dir, "artifacts", "screenshots")
     report_path = resolve_path(reports_dir, EDGEQA_REPORT_NAME)
 
     tests: Dict[str, TestRecord] = getattr(pytest, "edgeqa_tests", {})
@@ -107,6 +110,7 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     failed = len([test for test in tests.values() if test.status == "FAILED"])
     passed = max(collected - failed, 0)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    all_screenshots = _collect_all_screenshots(screenshots_dir, human_dir)
 
     html_content = _build_human_report(
         timestamp=timestamp,
@@ -115,6 +119,7 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         failed=failed,
         tests=list(tests.values()),
         human_dir=human_dir,
+        all_screenshots=all_screenshots,
     )
     with open(report_path, "w", encoding="utf-8") as handle:
         handle.write(html_content)
@@ -127,6 +132,7 @@ def _build_human_report(
     failed: int,
     tests: List[TestRecord],
     human_dir: str,
+    all_screenshots: List[str],
 ) -> str:
     summary = f"""
     <div class="summary">
@@ -185,6 +191,8 @@ def _build_human_report(
     failures_html = "\n".join(failure_cards) if failure_cards else "<div class='ok'>No failures.</div>"
     passed_html = "\n".join(passed_cards) if passed_cards else "<div class='ok'>No passed tests recorded.</div>"
 
+    screenshots_html = _build_all_screenshots_html(all_screenshots)
+
     return f"""
     <!doctype html>
     <html>
@@ -207,6 +215,9 @@ def _build_human_report(
         .badge {{ font-size: 11px; padding: 2px 6px; border-radius: 4px; color: #fff; margin-left: 6px; }}
         .badge.passed {{ background: #5cb85c; }}
         .badge.failed {{ background: #d9534f; }}
+        .gallery {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }}
+        .gallery img {{ width: 100%; border: 1px solid #ddd; border-radius: 6px; }}
+        .gallery .item {{ background: #fff; padding: 8px; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }}
         .screenshot img {{ max-width: 100%; border: 1px solid #ddd; border-radius: 6px; }}
         .label {{ font-size: 12px; color: #444; margin-bottom: 6px; }}
         .ok {{ background: #e7f6ea; padding: 12px; border-radius: 6px; }}
@@ -219,6 +230,8 @@ def _build_human_report(
       {failures_html}
       <h2>Passed Tests</h2>
       {passed_html}
+      <h2>All Screenshots</h2>
+      {screenshots_html}
     </body>
     </html>
     """
@@ -305,3 +318,53 @@ def _build_steps_html(steps: List[str], failed_step: Optional[str]) -> str:
         css = "failed" if failed_step and failed_step in step else ""
         items.append(f"<li class='{css}'>{html.escape(step)}</li>")
     return f"<ul>{''.join(items)}</ul>"
+
+
+def _collect_all_screenshots(screenshots_dir: str, human_dir: str) -> List[str]:
+    if not os.path.exists(screenshots_dir):
+        return []
+    target_dir = resolve_path(human_dir, "all_screenshots")
+    ensure_dirs([target_dir])
+    paths = []
+    for name in sorted(os.listdir(screenshots_dir)):
+        if not name.lower().endswith(".png"):
+            continue
+        source = resolve_path(screenshots_dir, name)
+        dest = resolve_path(target_dir, name)
+        try:
+            shutil.copyfile(source, dest)
+            paths.append(dest)
+        except Exception:  # noqa: BLE001
+            continue
+    return paths
+
+
+def _build_all_screenshots_html(paths: List[str]) -> str:
+    if not paths:
+        return "<div class='ok'>No screenshots captured.</div>"
+    items = []
+    for path in paths:
+        rel_path = f"human/all_screenshots/{html.escape(os.path.basename(path))}"
+        items.append(
+            f"""
+            <div class="item">
+              <div class="label">{html.escape(os.path.basename(path))}</div>
+              <img src="{rel_path}" alt="Screenshot" />
+            </div>
+            """
+        )
+    return f"<div class='gallery'>{''.join(items)}</div>"
+
+
+def _clean_directory(path: str) -> None:
+    if not os.path.exists(path):
+        return
+    for name in os.listdir(path):
+        item = os.path.join(path, name)
+        try:
+            if os.path.isfile(item):
+                os.remove(item)
+            elif os.path.isdir(item):
+                shutil.rmtree(item)
+        except Exception:  # noqa: BLE001
+            continue

@@ -43,6 +43,20 @@ class APIKeywords:
             assert_equal(response.status_code, expected_status, "DELETE status mismatch")
         return _parse_json(response.content)
 
+    def api_patch(self, path: str, payload: Dict[str, Any], expected_status: Optional[int] = None) -> Dict[str, Any]:
+        """Perform PATCH and return parsed JSON."""
+        response = self.api_client.patch(path, json_body=payload)
+        if expected_status is not None:
+            assert_equal(response.status_code, expected_status, "PATCH status mismatch")
+        return _parse_json(response.content)
+
+    def api_head(self, path: str, expected_status: Optional[int] = None) -> Dict[str, Any]:
+        """Perform HEAD and return parsed JSON."""
+        response = self.api_client.head(path)
+        if expected_status is not None:
+            assert_equal(response.status_code, expected_status, "HEAD status mismatch")
+        return _parse_json(response.content)
+
 
 def _parse_json(content: bytes) -> Dict[str, Any]:
     if not content:

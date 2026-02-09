@@ -59,6 +59,20 @@ class ApiClient:
             return _to_requests_response(response)
         return requests.delete(f"{self.base_url}{path}", json=json_body, timeout=self.timeout_ms / 1000)
 
+    def patch(self, path: str, json_body: Optional[Dict[str, Any]] = None) -> requests.Response:
+        """Perform PATCH request."""
+        if self.request_context:
+            response = self.request_context.patch(path, json=json_body)
+            return _to_requests_response(response)
+        return requests.patch(f"{self.base_url}{path}", json=json_body, timeout=self.timeout_ms / 1000)
+
+    def head(self, path: str) -> requests.Response:
+        """Perform HEAD request."""
+        if self.request_context:
+            response = self.request_context.head(path)
+            return _to_requests_response(response)
+        return requests.head(f"{self.base_url}{path}", timeout=self.timeout_ms / 1000)
+
 
 def _to_requests_response(playwright_response) -> requests.Response:
     """Convert Playwright response to requests.Response compatible object."""

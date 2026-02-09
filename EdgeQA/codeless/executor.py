@@ -124,6 +124,8 @@ class CodelessExecutor:
             timeout_ms=self.config["config"]["timeouts"]["default"],
             flow_handler=self._execute_flow,
             logger=self.logger,
+            artifacts_dir=artifacts_dir,
+            manager=manager,
         )
         action_map = build_action_map(keywords.ui, keywords.api, call_flow=keywords.call_flow)
         self._set_execution_context(action_map, manager)
@@ -183,26 +185,92 @@ class CodelessExecutor:
             flow_name = self._resolve_placeholders(step.locator or step.value or "")
             action(flow_name)
             return
-        if step.action in {"click", "hover", "wait_for_element", "assert_visible"}:
-            action(self._resolve_locator(self._resolve_placeholders(step.locator or "")))
+        if step.action in {
+            "click",
+            "double_click",
+            "right_click",
+            "hover",
+            "scroll_to",
+            "wait_for_element",
+            "wait_for_visible",
+            "wait_for_hidden",
+            "wait_for_attached",
+            "wait_for_detached",
+            "wait_for_enabled",
+            "wait_for_disabled",
+            "assert_visible",
+            "clear_text",
+            "browser_back",
+            "browser_refresh",
+            "launch_incognito_mode",
+            "switch_to_main_frame",
+            "maximize_window",
+        }:
+            if step.action in {
+                "browser_back",
+                "browser_refresh",
+                "launch_incognito_mode",
+                "switch_to_main_frame",
+                "maximize_window",
+            }:
+                action()
+            else:
+                action(self._resolve_locator(self._resolve_placeholders(step.locator or "")))
             return
-        if step.action in {"fill_text", "select_dropdown"}:
+        if step.action in {"fill_text", "select_dropdown", "press_key"}:
             action(
                 self._resolve_locator(self._resolve_placeholders(step.locator or "")),
                 self._resolve_placeholders(step.value or ""),
             )
             return
-        if step.action == "assert_text":
+        if step.action == "screenshot_full_page":
+            action(self._resolve_placeholders(step.value or step.expected))
+            return
+        if step.action == "screenshot_element":
             action(
                 self._resolve_locator(self._resolve_placeholders(step.locator or "")),
-                self._resolve_placeholders(step.expected or ""),
+                self._resolve_placeholders(step.value or step.expected),
             )
             return
-        if step.action in {"api_get"}:
+        if step.action == "new_tab":
+            action(self._resolve_placeholders(step.value or step.locator))
+            return
+        if step.action == "switch_window":
+            action(_to_int(self._resolve_placeholders(step.value or step.locator) or "0") or 0)
+            return
+        if step.action == "close_tab":
+            index = _to_int(self._resolve_placeholders(step.value or step.locator))
+            action(index)
+            return
+        if step.action == "switch_to_frame":
+            action(self._resolve_locator(self._resolve_placeholders(step.locator or "")))
+            return
+        if step.action in {"assert_text", "assert_contains_text"}:
+            action(
+                self._resolve_locator(self._resolve_placeholders(step.locator or "")),
+                self._resolve_placeholders(step.expected or step.value or ""),
+            )
+            return
+        if step.action == "wait_for_text":
+            action(
+                self._resolve_locator(self._resolve_placeholders(step.locator or "")),
+                self._resolve_placeholders(step.expected or step.value or ""),
+            )
+            return
+        if step.action == "assert_title":
+            action(self._resolve_placeholders(step.expected or step.value or ""))
+            return
+        if step.action == "wait_for_url":
+            action(self._resolve_placeholders(step.expected or step.value or ""))
+            return
+        if step.action == "wait_for_load_state":
+            action(self._resolve_placeholders(step.expected or step.value or ""))
+            return
+        if step.action in {"api_get", "api_head"}:
             endpoint = step.value or step.locator or ""
             action(self._resolve_placeholders(endpoint), expected_status=_to_int(self._resolve_placeholders(step.expected)))
             return
-        if step.action in {"api_post", "api_put", "api_delete"}:
+        if step.action in {"api_post", "api_put", "api_delete", "api_patch"}:
             payload = self._load_payload(step.value)
             action(self._resolve_placeholders(step.locator or ""), payload, expected_status=_to_int(self._resolve_placeholders(step.expected)))
             return

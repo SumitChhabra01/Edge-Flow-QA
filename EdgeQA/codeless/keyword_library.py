@@ -28,10 +28,12 @@ class KeywordLibrary:
         timeout_ms: int,
         flow_handler: Optional[Callable[[str], None]] = None,
         logger: Optional[logging.Logger] = None,
+        artifacts_dir: Optional[str] = None,
+        manager=None,
     ) -> "KeywordLibrary":
         """Create keyword library instances from execution context."""
         return KeywordLibrary(
-            ui=UIKeywords(page, timeout_ms),
+            ui=UIKeywords(page, timeout_ms, artifacts_dir=artifacts_dir, manager=manager),
             api=APIKeywords(api_client),
             flow_handler=flow_handler,
             logger=logger,
