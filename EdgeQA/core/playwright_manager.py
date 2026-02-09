@@ -56,12 +56,12 @@ class PlaywrightManager:
         if self.playwright:
             self.playwright.stop()
 
-    def screenshot_on_failure(self, test_name: str) -> Optional[str]:
+    def screenshot_on_failure(self, test_name: str, full_page: bool = False) -> Optional[str]:
         """Capture a screenshot and return its path."""
         if not self.page:
             return None
         screenshots_dir = ensure_dir(os.path.join(self.artifacts_dir, SCREENSHOTS_DIR_NAME))
         filename = f"{test_name}.png".replace(" ", "_")
         path = os.path.join(screenshots_dir, filename)
-        self.page.screenshot(path=path, full_page=True)
+        self.page.screenshot(path=path, full_page=full_page)
         return path

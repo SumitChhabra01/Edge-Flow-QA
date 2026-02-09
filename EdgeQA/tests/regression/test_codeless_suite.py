@@ -9,6 +9,8 @@ import pytest
 from codeless.executor import CodelessExecutor
 from core.constants import ENV_VAR_CODELESS_SUITE
 
+pytest.skip("Legacy codeless engine is deprecated. Use DSL runner.", allow_module_level=True)
+
 
 @pytest.mark.codeless
 @pytest.mark.regression

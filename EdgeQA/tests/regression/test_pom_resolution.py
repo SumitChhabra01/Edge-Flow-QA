@@ -9,6 +9,8 @@ from openpyxl import Workbook
 
 from codeless.executor import CodelessExecutor
 
+pytest.skip("Legacy codeless POM tests deprecated. Use DSL locator tests.", allow_module_level=True)
+
 
 def _create_object_repo(path: Path) -> None:
     workbook = Workbook()

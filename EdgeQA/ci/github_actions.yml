@@ -27,9 +27,9 @@ jobs:
         run: |
           python -m playwright install --with-deps
 
-      - name: Run tests
+      - name: Run DSL engine
         env:
           EDGEQA_ENV: qa
           EDGEQA_BROWSER: chromium
         run: |
-          python -m pytest -m "ui or api or codeless"
+          python runner.py --testcases "InputSheet/TestCases.xlsx"

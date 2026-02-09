@@ -1,4 +1,4 @@
-"""Pytest configuration for EdgeQA."""
+"""Generate EdgeQA HTML report for DSL engine."""
 
 from __future__ import annotations
 
@@ -8,13 +8,10 @@ import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
-
-import pytest
+from typing import List, Optional
 
 from utils.file_utils import ensure_dirs, resolve_path
 
-pytest_plugins = ["core.base_test"]
 
 EDGEQA_REPORT_NAME = "edgeqa_report.html"
 
@@ -32,82 +29,19 @@ class TestRecord:
     stderr: str
     error_snippet: str
     screenshot_path: Optional[str]
+    failure_entries: List[dict]
 
 
-@pytest.hookimpl(tryfirst=True)
-def pytest_configure() -> None:
-    """Ensure report and log directories exist before tests run."""
-    root_dir = os.path.abspath(os.path.dirname(__file__))
-    reports_dir = resolve_path(root_dir, "reports")
-    human_dir = resolve_path(reports_dir, "human")
-    screenshots_dir = resolve_path(reports_dir, "artifacts", "screenshots")
-    logs_dir = resolve_path(root_dir, "logs")
-    ensure_dirs([reports_dir, human_dir, logs_dir, screenshots_dir])
-    _clean_directory(screenshots_dir)
-    if not hasattr(pytest, "edgeqa_tests"):
-        pytest.edgeqa_tests = {}
-
-
-@pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_makereport(item, call):
-    """Capture test results with screenshots, steps, and root cause."""
-    outcome = yield
-    report = outcome.get_result()
-    if report.when != "call":
-        return
-
-    root_dir = os.path.abspath(os.path.dirname(__file__))
-    reports_dir = resolve_path(root_dir, "reports")
-    human_dir = resolve_path(reports_dir, "human")
-
-    stderr_text = _extract_captured_text(report.sections, "Captured stderr call")
-    log_text = _extract_captured_text(report.sections, "Captured log call")
-    combined_text = "\n".join([stderr_text, log_text]).strip()
-    steps = _extract_steps(combined_text)
-    failed_step = _extract_failed_step(combined_text)
-
-    screenshot_path = None
-    if report.failed:
-        if "page" in item.funcargs:
-            page = item.funcargs["page"]
-            filename = _safe_filename(report.nodeid) + ".png"
-            screenshot_path = resolve_path(human_dir, filename)
-            try:
-                page.screenshot(path=screenshot_path, full_page=False)
-            except Exception:  # noqa: BLE001
-                screenshot_path = None
-        else:
-            screenshot_path = _extract_screenshot_path(report.longreprtext)
-            if screenshot_path:
-                screenshot_path = _copy_screenshot(screenshot_path, human_dir)
-
-    root_cause = _extract_root_cause(report.longreprtext) if report.failed else None
-    error_snippet = _simplify_error_log(combined_text)
-
-    pytest.edgeqa_tests[report.nodeid] = TestRecord(
-        nodeid=report.nodeid,
-        test_name=item.name,
-        status="FAILED" if report.failed else "PASSED",
-        root_cause=root_cause,
-        failed_step=failed_step,
-        steps=steps,
-        stderr=combined_text,
-        error_snippet=error_snippet,
-        screenshot_path=screenshot_path,
-    )
-
-
-def pytest_sessionfinish(session, exitstatus) -> None:
-    """Generate a human-friendly HTML report for non-technical users."""
-    root_dir = os.path.abspath(os.path.dirname(__file__))
+def write_report(root_dir: str, tests: List[TestRecord]) -> str:
+    """Write EdgeQA report and return its path."""
     reports_dir = resolve_path(root_dir, "reports")
     human_dir = resolve_path(reports_dir, "human")
     screenshots_dir = resolve_path(reports_dir, "artifacts", "screenshots")
     report_path = resolve_path(reports_dir, EDGEQA_REPORT_NAME)
+    ensure_dirs([reports_dir, human_dir, screenshots_dir])
 
-    tests: Dict[str, TestRecord] = getattr(pytest, "edgeqa_tests", {})
-    collected = getattr(session, "testscollected", 0)
-    failed = len([test for test in tests.values() if test.status == "FAILED"])
+    collected = len(tests)
+    failed = len([test for test in tests if test.status == "FAILED"])
     passed = max(collected - failed, 0)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     all_screenshots = _collect_all_screenshots(screenshots_dir, human_dir)
@@ -117,12 +51,29 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         total=collected,
         passed=passed,
         failed=failed,
-        tests=list(tests.values()),
+        tests=tests,
         human_dir=human_dir,
         all_screenshots=all_screenshots,
     )
     with open(report_path, "w", encoding="utf-8") as handle:
         handle.write(html_content)
+    return report_path
+
+
+def clean_screenshots(root_dir: str) -> None:
+    """Remove old screenshots before run."""
+    screenshots_dir = resolve_path(root_dir, "reports", "artifacts", "screenshots")
+    if not os.path.exists(screenshots_dir):
+        return
+    for name in os.listdir(screenshots_dir):
+        item = os.path.join(screenshots_dir, name)
+        try:
+            if os.path.isfile(item):
+                os.remove(item)
+            elif os.path.isdir(item):
+                shutil.rmtree(item)
+        except Exception:  # noqa: BLE001
+            continue
 
 
 def _build_human_report(
@@ -163,6 +114,7 @@ def _build_human_report(
             <div class="cause"><strong>Failed Step:</strong> {html.escape(record.failed_step or 'Unknown step')}</div>
             <div class="log-snippet"><strong>Error Log:</strong><pre>{html.escape(record.error_snippet)}</pre></div>
             """
+        failure_details = _build_failure_entries_html(record.failure_entries)
 
         stderr_section = ""
         if record.stderr:
@@ -179,6 +131,7 @@ def _build_human_report(
             <strong>Steps:</strong>
             {steps_html}
           </div>
+          {failure_details}
           {stderr_section}
           {screenshot_block}
         </div>
@@ -190,7 +143,6 @@ def _build_human_report(
 
     failures_html = "\n".join(failure_cards) if failure_cards else "<div class='ok'>No failures.</div>"
     passed_html = "\n".join(passed_cards) if passed_cards else "<div class='ok'>No passed tests recorded.</div>"
-
     screenshots_html = _build_all_screenshots_html(all_screenshots)
 
     return f"""
@@ -237,77 +189,11 @@ def _build_human_report(
     """
 
 
-def _extract_root_cause(longreprtext: str) -> str:
-    for line in longreprtext.splitlines():
-        if line.startswith("E "):
-            return line[2:].strip()
-    for line in reversed(longreprtext.splitlines()):
+def _extract_root_cause(error_message: str) -> str:
+    for line in error_message.splitlines():
         if line.strip():
             return line.strip()
     return "Unknown error"
-
-
-def _extract_screenshot_path(text: str) -> Optional[str]:
-    match = re.search(r"screenshot=([A-Za-z]:\\\\[^\\s]+\\.png)", text)
-    if match:
-        return match.group(1)
-    match = re.search(r"screenshot=([^\\s]+\\.png)", text)
-    if match:
-        return match.group(1)
-    return None
-
-
-def _copy_screenshot(path: str, human_dir: str) -> Optional[str]:
-    if not os.path.exists(path):
-        return None
-    ensure_dirs([human_dir])
-    dest = resolve_path(human_dir, os.path.basename(path))
-    try:
-        shutil.copyfile(path, dest)
-        return dest
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _safe_filename(text: str) -> str:
-    safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", text)
-    return safe.strip("_")
-
-
-def _extract_captured_text(sections: List[Tuple[str, str]], label: str) -> str:
-    for name, content in sections:
-        if name == label:
-            return content
-    return ""
-
-
-def _extract_steps(text: str) -> List[str]:
-    steps = []
-    for line in text.splitlines():
-        if "Executing step:" in line:
-            steps.append(line.split("Executing step:", 1)[1].strip())
-        elif "[FLOW STEP]" in line:
-            steps.append(line.split("[FLOW STEP]", 1)[1].strip())
-    return steps
-
-
-def _extract_failed_step(text: str) -> Optional[str]:
-    failed_line = None
-    for line in text.splitlines():
-        if "Step failed:" in line:
-            failed_line = line
-    if failed_line:
-        match = re.search(r"Step failed:\s*(.+?)\s*\|\s*error", failed_line)
-        if match:
-            return match.group(1).strip()
-    return steps[-1] if (steps := _extract_steps(text)) else None
-
-
-def _simplify_error_log(text: str) -> str:
-    lines = [line for line in text.splitlines() if "ERROR" in line or "Error:" in line]
-    if lines:
-        return "\n".join(lines[-6:])
-    return "\n".join(text.splitlines()[-6:])
 
 
 def _build_steps_html(steps: List[str], failed_step: Optional[str]) -> str:
@@ -318,6 +204,30 @@ def _build_steps_html(steps: List[str], failed_step: Optional[str]) -> str:
         css = "failed" if failed_step and failed_step in step else ""
         items.append(f"<li class='{css}'>{html.escape(step)}</li>")
     return f"<ul>{''.join(items)}</ul>"
+
+
+def _build_failure_entries_html(entries: List[dict]) -> str:
+    if not entries:
+        return ""
+    items = []
+    for entry in entries:
+        screenshot_html = ""
+        if entry.get("screenshot"):
+            name = os.path.basename(entry["screenshot"])
+            screenshot_html = f"""
+            <div class="label">Failure Screenshot</div>
+            <img src="human/all_screenshots/{html.escape(name)}" alt="Failure screenshot" />
+            """
+        items.append(
+            f"""
+            <div class="log-snippet">
+              <strong>Failure ({html.escape(entry.get('category', 'UNKNOWN'))}):</strong>
+              <pre>{html.escape(entry.get('step', ''))}\n{html.escape(entry.get('error', ''))}</pre>
+              {screenshot_html}
+            </div>
+            """
+        )
+    return "".join(items)
 
 
 def _collect_all_screenshots(screenshots_dir: str, human_dir: str) -> List[str]:
@@ -356,15 +266,15 @@ def _build_all_screenshots_html(paths: List[str]) -> str:
     return f"<div class='gallery'>{''.join(items)}</div>"
 
 
-def _clean_directory(path: str) -> None:
-    if not os.path.exists(path):
-        return
-    for name in os.listdir(path):
-        item = os.path.join(path, name)
-        try:
-            if os.path.isfile(item):
-                os.remove(item)
-            elif os.path.isdir(item):
-                shutil.rmtree(item)
-        except Exception:  # noqa: BLE001
-            continue
+def summarize_error(error_message: str) -> str:
+    """Return a concise error summary."""
+    lines = [line for line in error_message.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return "\n".join(lines[-6:])
+
+
+def safe_name(text: str) -> str:
+    """Return a filesystem-safe name."""
+    safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", text)
+    return safe.strip("_")

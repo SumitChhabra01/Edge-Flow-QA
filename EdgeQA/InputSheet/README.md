@@ -1,81 +1,63 @@
 # EdgeQA InputSheet Guide
 
-## What is a Flow
+## Excel DSL (Mini Language)
 
-A Flow is a reusable group of steps (like login or logout) that you can call from any test case. This keeps tests short, readable, and consistent.
+### What it is
 
-## How to Create Reusable Flows
+The DSL lets you describe *what* to do in Excel while the framework decides *how* to do it.
 
-1. Open your Excel file.
-2. Go to the `FLOWS` sheet.
-3. Add a new `FlowName`, then list its steps in order.
-4. Use the same columns as normal steps.
+### Key files
 
-## How to Call Flows in Tests
+- `TestCases.xlsx` holds your test list and step sheets.
+- `LocatorRepository.xlsx` stores all UI locators in one place.
+- `flows/*.flow.xlsx` stores reusable flows like login.
 
-1. In your test case sheet, add a new row.
-2. Set `Action` to `CALL_FLOW`.
-3. Put the flow name in the `Locator` (or `Endpoint` for API sheets).
+### TestCases sheet
+
+| TestCaseID | Description | Execute (Y/N) | BeforeHook | StepsSheet | AfterHook |
+
+### Step sheet
+
+| Seq | Execute (Y/N) | COMMAND | TARGET | DATA | CONDITION | STORE | Failure Category |
+
+### Examples
+
+- `OPEN_URL` with `${BASE_URL}` and `Execute (Y/N)=Y`
+- `Failure Category` can be `CONTINUE_ON_FAILURE` or `STOP_ON_FAILURE`
+- `CLICK` with `LoginPage.submit`
+- `API_CALL` with target `/posts/1` and data `GET`
+
+## Locator Repository
+
+### Format
+
+`LocatorRepository.xlsx` uses this structure:
+
+| Page | Name | Primary | Secondary | Type |
 
 Example:
 
-| Step | Action    | Locator     |
-| ---- | --------- | ----------- |
-| 1    | CALL_FLOW | LOGIN_FLOW  |
+| LoginPage | submit | #loginBtn | //button[text()='Login'] | button |
 
-## Common Mistakes
+### How to reference
 
-- Misspelling the flow name
-- Creating a circular flow (Flow A calls Flow B which calls Flow A)
-- Calling a test case from a flow
-- Leaving the flow name empty
+Use `Page.Name` in the **TARGET** column:
 
-## Best Practices
+```
+LoginPage.submit
+```
 
-- Keep flows small and focused
-- Use clear, descriptive flow names
+## Flows
+
+Flows live in `flows/*.flow.xlsx` and can be called using:
+
+```
+CALL_FLOW | Login | user=admin;pass=secret
+```
+
+## Best practices
+
+- Keep commands simple and readable
+- Use `${VAR}` for dynamic values
+- Keep all locators in `LocatorRepository.xlsx`
 - Reuse flows for login, setup, and cleanup
-- Use `{{base_url}}` for environment-aware URLs
-- For API payloads, you can use inline JSON or a `.json` file in `InputSheet/`
-
-## Object Repository (POM)
-
-### Why POM is used
-
-POM keeps all UI locators in one place so tests stay clean and easy to read. If a locator changes, you update it once in the repository instead of fixing every test.
-
-### How to add a new page
-
-1. Open `ObjectRepository.xlsx`.
-2. Add a new sheet named after your page (for example, `LoginPage`).
-3. Add locators using the columns: `LocatorName`, `LocatorType`, `LocatorValue`.
-
-### How to add locators
-
-Example:
-
-| LocatorName | LocatorType | LocatorValue |
-| ----------- | ----------- | ------------ |
-| username    | css         | #username    |
-| loginBtn    | css         | #loginBtn    |
-
-### How to reference locators in tests
-
-Use this format in the **Locator** column:
-
-```
-PageName.LocatorName
-```
-
-Example:
-
-```
-LoginPage.username
-```
-
-### Best practices
-
-- Use short, clear locator names
-- Keep names consistent across pages
-- Prefer stable locators like IDs or data attributes
-- Reuse the same locator across flows and tests
